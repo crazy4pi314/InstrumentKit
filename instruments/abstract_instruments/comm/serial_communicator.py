@@ -182,7 +182,9 @@ class SerialCommunicator(io.IOBase, AbstractCommunicator):
 
         :param str msg: The command message to send to the instrument
         """
-        msg += self._terminator
+        if self._terminator:
+            msg += self._terminator
+            
         self.write(msg)
 
     def _query(self, msg, size=-1):
