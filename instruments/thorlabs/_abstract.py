@@ -16,6 +16,7 @@ from instruments.abstract_instruments.instrument import Instrument
 from instruments.util_fns import assume_units
 
 from quantities import second
+from collections import defaultdict
 
 # CLASSES #####################################################################
 
@@ -30,6 +31,7 @@ class ThorLabsInstrument(Instrument):
     def __init__(self, filelike):
         super(ThorLabsInstrument, self).__init__(filelike)
         self.terminator = ''
+        self._packet_queue = defaultdict(list)
 
     def sendpacket(self, packet):
         """
@@ -41,6 +43,51 @@ class ThorLabsInstrument(Instrument):
         :type packet: `ThorLabsPacket`
         """
         self._file.write_raw(packet.pack())
+    
+    def readpacket(self, expect=None, timeout=None):
+        t_start = time.time()
+
+        if timeout:
+            timeout = assume_units(timeout, second).rescale('second').magnitude
+
+        while True:
+            # read the next packet
+            resp = self._file.read_raw()
+            if resp is None:
+                break
+            else:
+                pkt = _packets.ThorLabsPacket.unpack(resp)
+                # oneshot
+                if timeout is None:
+                    break
+                # if you got the message you wanted
+                if pkt._message_id is expect:
+                    break
+                # if you didnt get the expected message
+                else:
+                    self._packet_queue[pkt._message_id].append(pkt)
+                    tic = time.time()
+                    if tic - t_start > timeout:
+                        raise TimeoutError("APT has faild to read the expected message"
+                                   "ID within the device timeout. Last message"
+                                   "was {}, was looking for"
+                                   "{}".format(pkt._message_id, expect))
+                        break
+        
+        if resp is None:
+            if expect is None:
+                return None
+            else:
+                raise IOError("Expected packet {}, got nothing instead.".format(
+                    expect
+                ))
+        if expect is not None and pkt._message_id != expect:
+            raise IOError("APT returned message ID {}, expected {}".format(
+                pkt._message_id, expect
+            ))
+
+        return pkt
+
 
     # pylint: disable=protected-access
     def querypacket(self, packet, expect=None, timeout=None):
@@ -69,34 +116,5 @@ class ThorLabsInstrument(Instrument):
             a ThorLabs APT packet, or None if no packet was received.
         :rtype: `ThorLabsPacket`
         """
-        t_start = time.time()
-
-        if timeout:
-            timeout = assume_units(timeout, second).rescale('second').magnitude
-
-        while True:
-            self._file.write_raw(packet.pack())
-            resp = self._file.read_raw()
-            if resp or timeout is None:
-                break
-            else:
-                tic = time.time()
-                if tic - t_start > timeout:
-                    break
-
-        if not resp:
-            if expect is None:
-                return None
-            else:
-                raise IOError("Expected packet {}, got nothing instead.".format(
-                    expect
-                ))
-        pkt = _packets.ThorLabsPacket.unpack(resp)
-        if expect is not None and pkt._message_id != expect:
-            # TODO: make specialized subclass that can record the offending
-            #       packet.
-            raise IOError("APT returned message ID {}, expected {}".format(
-                pkt._message_id, expect
-            ))
-
-        return pkt
+        self._file.write_raw(packet.pack())
+        return self.readpacket(expect=expect, timeout=timeout)
