@@ -20,6 +20,7 @@ import serial
 from builtins import map
 from serial import SerialException 
 from serial.tools.list_ports import comports
+from ast import literal_eval
 
 from future.standard_library import install_aliases
 import numpy as np
@@ -311,8 +312,20 @@ class Instrument(object):
     # CLASS METHODS #
 
     URI_SCHEMES = ["serial", "tcpip", "gpib+usb",
-                   "gpib+serial", "visa", "file", "usbtmc", "vxi11",
+                   "gpib+serial","rfc2217", "visa", "file", "usbtmc", "vxi11",
                    "test"]
+
+    def decode_kwarg_dict(kwarg_dict):
+        """
+        """
+        for kwarg, value in kwarg_dict.items():
+            try:
+                kwarg_dict[kwarg] = [literal_eval(item) for item in value]
+            except ValueError:
+                pass
+            if len(kwarg_dict[kwarg]) is 1:
+                kwarg_dict[kwarg] = kwarg_dict[kwarg][0]
+        return kwarg_dict
 
     @classmethod
     def open_from_uri(cls, uri):
@@ -360,13 +373,36 @@ class Instrument(object):
         # class method.
         # FIXME: This currently won't work, as everything is strings,
         #        but the other class methods expect ints or floats, depending.
-        kwargs = parse.parse_qs(parsed_uri.query)
+        kwargs = decode_kwarg_dict(parse.parse_qs(parsed_uri.query))
         if parsed_uri.scheme == "serial":
             # Ex: serial:///dev/ttyACM0
             # We want to pass just the netloc and the path to PySerial,
             # sending the query string as kwargs. Thus, we should make the
             # device name here.
             dev_name = parsed_uri.netloc
+            if parsed_uri.path:
+                dev_name = os.path.join(dev_name, parsed_uri.path)
+            
+
+            # We should handle the baud rate separately, however, to ensure
+            # that the default is set correctly and that the type is `int`,
+            # as expected.
+            if "baud" in kwargs:
+                kwargs["baud"] = int(kwargs["baud"][0])
+            else:
+                kwargs["baud"] = 115200
+
+            return cls.open_serial(
+                dev_name,
+                **kwargs)
+
+        elif parsed_uri.scheme == "rfc2217":
+            # Ex: rfc2217://10.125.0.122:2020
+            # We want to pass just the netloc and the path to PySerial,
+            # sending the query string as kwargs. Thus, we should make the
+            # device name here.
+            dev_name = parsed_uri.scheme+"://"+parsed_uri.netloc
+            
             if parsed_uri.path:
                 dev_name = os.path.join(dev_name, parsed_uri.path)
 
@@ -378,7 +414,7 @@ class Instrument(object):
             else:
                 kwargs["baud"] = 115200
 
-            return cls.open_serial(
+            return cls.open_serial_remote(
                 dev_name,
                 **kwargs)
         elif parsed_uri.scheme == "tcpip":
@@ -442,11 +478,13 @@ class Instrument(object):
         conn = socket.socket()
         conn.connect((host, port))
         return cls(SocketCommunicator(conn))
-
+ 
     # pylint: disable=too-many-arguments
     @classmethod
     def open_serial(cls, port=None, baud=9600, vid=None, pid=None,
-                    serial_number=None, timeout=3, write_timeout=3):
+                    serial_number=None, timeout=3, write_timeout=3,
+                     bytesize=EIGHTBITS, parity=PARITY_NONE, stopbits=STOPBITS_ONE, 
+                      xonxoff=False, rtscts=False, dsrdtr=False):
         """
         Opens an instrument, connecting via a physical or emulated serial port.
         Note that many instruments which connect via USB are exposed to the
@@ -525,7 +563,9 @@ class Instrument(object):
             port,
             baud=baud,
             timeout=timeout,
-            write_timeout=write_timeout
+            write_timeout=write_timeout,
+
+
         )
         return cls(ser)
 
