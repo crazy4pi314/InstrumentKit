@@ -18,7 +18,7 @@ import socket
 import serial
 
 from builtins import map
-from serial import SerialException 
+from serial import SerialException
 from serial.tools.list_ports import comports
 from ast import literal_eval
 
@@ -312,18 +312,18 @@ class Instrument(object):
     # CLASS METHODS #
 
     URI_SCHEMES = ["serial", "tcpip", "gpib+usb",
-                   "gpib+serial","rfc2217", "visa", "file", "usbtmc", "vxi11",
+                   "gpib+serial", "rfc2217", "visa", "file", "usbtmc", "vxi11",
                    "test"]
 
     def _decode_kwarg_dict(kwarg_dict):
         """
-        This helper function is to address that the URI strings parse to 
+        This helper function is to address that the URI strings parse to
         strings, and most other functions expect other types for arguments.
         Strings that do have a "literal" meaning in python "None" or "3.241"
         are converted to the correct types, and if it is not an inferable type
         then it is left as a string. Also as `parse.parse_qs` returns wrapped
-        in list, single item lists are stripped of this so that they can be 
-        passed correctly. 
+        in list, single item lists are stripped of this so that they can be
+        passed correctly.
 
         :param dict kwarg_dict: dictionary to walk through and parse the string
         values to "literal" typed python values.
@@ -390,7 +390,7 @@ class Instrument(object):
         # We always want the query string to provide keyword args to the
         # class method.
 
-        kwargs = _decode_kwarg_dict(parse.parse_qs(parsed_uri.query))
+        kwargs = cls._decode_kwarg_dict(parse.parse_qs(parsed_uri.query))
 
         if parsed_uri.scheme == "serial":
             # Ex: serial:///dev/ttyACM0
@@ -407,7 +407,7 @@ class Instrument(object):
 
             return cls.open_serial(
                 dev_name,
-                remote = False,
+                remote=False,
                 **kwargs)
 
         elif parsed_uri.scheme == "rfc2217":
@@ -416,7 +416,6 @@ class Instrument(object):
             # sending the query string as kwargs. Thus, we should make the
             # device name here.
             dev_name = parsed_uri.scheme+"://"+parsed_uri.netloc
-            
             if parsed_uri.path:
                 dev_name = os.path.join(dev_name, parsed_uri.path)
             # We should handle the baud rate separately, however, to ensure
@@ -426,7 +425,7 @@ class Instrument(object):
 
             return cls.open_serial(
                 dev_name,
-                remote = True,
+                remote=True,
                 **kwargs)
 
         elif parsed_uri.scheme == "tcpip":
@@ -490,7 +489,7 @@ class Instrument(object):
         conn = socket.socket()
         conn.connect((host, port))
         return cls(SocketCommunicator(conn))
- 
+    
     @classmethod
     def open_serial(cls, location, remote=False, **kwargs):
         if remote:
@@ -501,7 +500,7 @@ class Instrument(object):
     # pylint: disable=too-many-arguments
     @classmethod
     def _open_serial_local(cls, port=None, baud=9600, vid=None, pid=None,
-                    serial_number=None, timeout=3, write_timeout=3):
+                           serial_number=None, timeout=3, write_timeout=3):
         """
         Opens an instrument, connecting via a physical or emulated serial port.
         Note that many instruments which connect via USB are exposed to the
@@ -589,13 +588,13 @@ class Instrument(object):
 
     # pylint: disable=too-many-arguments
     @classmethod
-    def _open_serial_remote(cls, url=None, baud=115200, dsrdtr=False, 
-                            rtscts=False, xonxoff = True, timeout=3, 
-                            bytesize=serial.EIGHTBITS, parity=serial.PARITY_NONE, 
+    def _open_serial_remote(cls, url=None, baud=115200, dsrdtr=False,
+                            rtscts=False, xonxoff=True, timeout=3,
+                            bytesize=serial.EIGHTBITS, parity=serial.PARITY_NONE,
                             stopbits=serial.STOPBITS_ONE):
         """
-        This method follows updates in the API for PySerial so that IK can use the new 
-        serial.serial_for_url constuctor for serial devices. 
+        This method follows updates in the API for PySerial so that IK can use the new
+        serial.serial_for_url constuctor for serial devices.
         
         :param str url: The description of the location of the device to connect
             to. See http://pyserial.readthedocs.io/en/latest/url_handlers.html#urls
@@ -612,21 +611,19 @@ class Instrument(object):
         :return: Object representing the connected instrument.
 
         .. seealso::
-            `~serial.serial_for_url` for description of `url`, baud rates and timeouts.     
-
-        
+            `~serial.serial_for_url` for description of `url`, baud rates and timeouts.
         """
         # TODO: it't possible `serial.serial_for_url` could handle all URIs valid
         # in PySerial, but untill that feature is stable we can keep it seperate.
         ser = serial.serial_for_url(
-            url, 
+            url,
             baudrate=baud,
             timeout=timeout,
-            xonxoff=xonxoff, 
-            rtscts=rtscts, 
+            xonxoff=xonxoff,
+            rtscts=rtscts,
             dsrdtr=dsrdtr,
-            bytesize=bytesize, 
-            parity=parity, 
+            bytesize=bytesize,
+            parity=parity,
             stopbits=stopbits
         )
         return cls(SerialCommunicator(ser))
