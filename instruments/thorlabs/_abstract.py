@@ -8,6 +8,7 @@ Defines a generic Thorlabs instrument to define some common functionality.
 
 from __future__ import absolute_import
 from __future__ import division
+from collections import defaultdict
 
 import time
 
@@ -16,7 +17,7 @@ from instruments.abstract_instruments.instrument import Instrument
 from instruments.util_fns import assume_units
 
 from quantities import second
-from collections import defaultdict
+
 
 # CLASSES #####################################################################
 
@@ -43,37 +44,65 @@ class ThorLabsInstrument(Instrument):
         :type packet: `ThorLabsPacket`
         """
         self._file.write_raw(packet.pack())
-    
-    def readpacket(self, expect=None, timeout=None):
-        t_start = time.time()
 
+    # pylint: disable=protected-access
+    def readpacket(self, expect=None, timeout=None):
+        """
+        Reads packets from a device and filters them based on a optional
+        expected value.
+        
+        :param expect: The expected message id from the response. If an
+            an incorrect id is received then it is added to a buffer and
+            it continues reading until either the right response is recieved
+            or the timeout is hit. If left with the default value of `None` 
+            then no checking occurs.
+        :type expect: `str` or `None`
+
+        :param timeout: Sets a timeout to wait before returning `None`, indicating
+            no packet was received. If the timeout is set to `None`, then the
+            timeout is inherited from the underlying communicator and no additional
+            timeout is added. If timeout is set to `False`, then this method waits
+            indefinitely. If timeout is set to a unitful quantity, then it is interpreted
+            as a time and used as the timeout value. Finally, if the timeout is a unitless
+            number (e.g. `float` or `int`), then seconds are assumed.
+
+        :return: Returns the response back from the instrument wrapped up in
+            a ThorLabs APT packet, or None if no packet was received.
+
+        :rtype: `ThorLabsPacket`
+        """
         if timeout:
             timeout = assume_units(timeout, second).rescale('second').magnitude
+        t_start = time.time()
 
         while True:
             # read the next packet
             resp = self._file.read_raw()
-            if resp is None:
-                break
-            else:
+            # if the packet is not empty, process it
+            if resp != b"":
+                # unpack the TL data format
                 pkt = _packets.ThorLabsPacket.unpack(resp)
-                # oneshot
-                if timeout is None:
+                resp_id = pkt._message_id
+                if resp is None:
                     break
-                # if you got the message you wanted
-                if pkt._message_id is expect:
+                # one shot/you got what you wanted
+                elif (timeout is None) or (resp_id == expect):
                     break
-                # if you didnt get the expected message
+                # if you didnt get the expected message, add it to a list.
                 else:
-                    self._packet_queue[pkt._message_id].append(pkt)
-                    tic = time.time()
-                    if tic - t_start > timeout:
-                        raise TimeoutError("APT has faild to read the expected message"
-                                   "ID within the device timeout. Last message"
-                                   "was {}, was looking for"
-                                   "{}".format(pkt._message_id, expect))
-                        break
-        
+                    self._packet_queue[resp_id].append(pkt)
+            # the packet was empty so for error reporting its empty
+            else:
+                resp_id = "empty"
+
+            # check to see if we have been reading long enough
+            tic = time.time()
+            if not (timeout == False):
+                if tic - t_start > timeout:
+                    raise TimeoutError("APT has faild to read the expected message"
+                                    "ID within the device timeout. Last message"
+                                    " was {}, was looking for {}".format(
+                                        resp_id, expect))
         if resp is None:
             if expect is None:
                 return None
@@ -117,4 +146,7 @@ class ThorLabsInstrument(Instrument):
         :rtype: `ThorLabsPacket`
         """
         self._file.write_raw(packet.pack())
-        return self.readpacket(expect=expect, timeout=timeout)
+        # print(["expect in querry", expect])
+        read = self.readpacket(expect=expect, timeout=timeout)
+        # print([type(read),read])
+        return read
