@@ -315,8 +315,26 @@ class Instrument(object):
                    "gpib+serial","rfc2217", "visa", "file", "usbtmc", "vxi11",
                    "test"]
 
-    def decode_kwarg_dict(kwarg_dict):
+    def _decode_kwarg_dict(kwarg_dict):
         """
+        This helper function is to address that the URI strings parse to 
+        strings, and most other functions expect other types for arguments.
+        Strings that do have a "literal" meaning in python "None" or "3.241"
+        are converted to the correct types, and if it is not an inferable type
+        then it is left as a string. Also as `parse.parse_qs` returns wrapped
+        in list, single item lists are stripped of this so that they can be 
+        passed correctly. 
+
+        :param dict kwarg_dict: dictionary to walk through and parse the string
+        values to "literal" typed python values.
+
+        :rtype: `dict`
+
+        .. seealso::
+            `parse` documentation for what can be interpreted to have "literal"
+            meaning
+
+        .. parse: https://docs.python.org/3/library/ast.html#ast.literal_eval
         """
         for kwarg, value in kwarg_dict.items():
             try:
@@ -371,9 +389,9 @@ class Instrument(object):
 
         # We always want the query string to provide keyword args to the
         # class method.
-        # FIXME: This currently won't work, as everything is strings,
-        #        but the other class methods expect ints or floats, depending.
-        kwargs = decode_kwarg_dict(parse.parse_qs(parsed_uri.query))
+
+        kwargs = _decode_kwarg_dict(parse.parse_qs(parsed_uri.query))
+
         if parsed_uri.scheme == "serial":
             # Ex: serial:///dev/ttyACM0
             # We want to pass just the netloc and the path to PySerial,
@@ -382,18 +400,14 @@ class Instrument(object):
             dev_name = parsed_uri.netloc
             if parsed_uri.path:
                 dev_name = os.path.join(dev_name, parsed_uri.path)
-            
-
             # We should handle the baud rate separately, however, to ensure
-            # that the default is set correctly and that the type is `int`,
-            # as expected.
-            if "baud" in kwargs:
-                kwargs["baud"] = int(kwargs["baud"][0])
-            else:
+            # that the default is set correctly.
+            if "baud" not in kwargs:
                 kwargs["baud"] = 115200
 
             return cls.open_serial(
                 dev_name,
+                remote = False,
                 **kwargs)
 
         elif parsed_uri.scheme == "rfc2217":
@@ -405,18 +419,16 @@ class Instrument(object):
             
             if parsed_uri.path:
                 dev_name = os.path.join(dev_name, parsed_uri.path)
-
             # We should handle the baud rate separately, however, to ensure
-            # that the default is set correctly and that the type is `int`,
-            # as expected.
-            if "baud" in kwargs:
-                kwargs["baud"] = int(kwargs["baud"][0])
-            else:
+            # that the default is set correctly
+            if "baud" not in kwargs:
                 kwargs["baud"] = 115200
 
-            return cls.open_serial_remote(
+            return cls.open_serial(
                 dev_name,
+                remote = True,
                 **kwargs)
+
         elif parsed_uri.scheme == "tcpip":
             # Ex: tcpip://192.168.0.10:4100
             host, port = parsed_uri.netloc.split(":")
@@ -479,12 +491,17 @@ class Instrument(object):
         conn.connect((host, port))
         return cls(SocketCommunicator(conn))
  
+    @classmethod
+    def open_serial(cls, location, remote=False, **kwargs):
+        if remote:
+            return cls._open_serial_remote(url=location, **kwargs)
+        else:
+            return cls._open_serial_local(port=location, **kwargs)
+
     # pylint: disable=too-many-arguments
     @classmethod
-    def open_serial(cls, port=None, baud=9600, vid=None, pid=None,
-                    serial_number=None, timeout=3, write_timeout=3,
-                     bytesize=EIGHTBITS, parity=PARITY_NONE, stopbits=STOPBITS_ONE, 
-                      xonxoff=False, rtscts=False, dsrdtr=False):
+    def _open_serial_local(cls, port=None, baud=9600, vid=None, pid=None,
+                    serial_number=None, timeout=3, write_timeout=3):
         """
         Opens an instrument, connecting via a physical or emulated serial port.
         Note that many instruments which connect via USB are exposed to the
@@ -567,25 +584,50 @@ class Instrument(object):
 
 
         )
+
         return cls(ser)
 
+    # pylint: disable=too-many-arguments
     @classmethod
-    def open_serial_remote(cls, url=None, baud=115200, dsrdtr=False, rtscts=False,
-                    xonxoff = True, timeout=3):
+    def _open_serial_remote(cls, url=None, baud=115200, dsrdtr=False, 
+                            rtscts=False, xonxoff = True, timeout=3, 
+                            bytesize=serial.EIGHTBITS, parity=serial.PARITY_NONE, 
+                            stopbits=serial.STOPBITS_ONE):
         """
         This method follows updates in the API for PySerial so that IK can use the new 
-        serial.serial_for_url constuctor for serial devices.
-        TODO: Finish me
+        serial.serial_for_url constuctor for serial devices. 
+        
+        :param str url: The description of the location of the device to connect
+            to. See http://pyserial.readthedocs.io/en/latest/url_handlers.html#urls
+            for all the options.
+        :param int baud: The baud rate at which instrument communicates.
+        :param bool dsrdtr: Enable hardware (DSR/DTR) flow control
+        :param bool rtscts:  Enable hardware (RTS/CTS) flow control.
+        :param bool xonxoff: Enable software flow control.
+        :param float timeout: Number of seconds to wait when reading from the
+            instrument before timing out.
+
+
+        :rtype: `Instrument`
+        :return: Object representing the connected instrument.
+
+        .. seealso::
+            `~serial.serial_for_url` for description of `url`, baud rates and timeouts.     
+
+        
         """
-        # baudrate=9600, bytesize=8, parity='N', stopbits=1, timeout=None, xonxoff=False, rtscts=False, dsrdtr=False
-        #Should put in parsing to check for valid URL?
+        # TODO: it't possible `serial.serial_for_url` could handle all URIs valid
+        # in PySerial, but untill that feature is stable we can keep it seperate.
         ser = serial.serial_for_url(
             url, 
             baudrate=baud,
             timeout=timeout,
             xonxoff=xonxoff, 
             rtscts=rtscts, 
-            dsrdtr=dsrdtr
+            dsrdtr=dsrdtr,
+            bytesize=bytesize, 
+            parity=parity, 
+            stopbits=stopbits
         )
         return cls(SerialCommunicator(ser))
 
